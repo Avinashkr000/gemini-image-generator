@@ -1,43 +1,63 @@
 package config
 
 import (
-	"context"
+	"fmt"
 	"log"
 	"os"
-	"time"
 
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+
+	"gemini-image-generator/models"
 )
 
-var DB *mongo.Database
+var DB *gorm.DB
 
 func ConnectDB() {
-	mongoURI := os.Getenv("MONGODB_URI")
-	if mongoURI == "" {
-		mongoURI = "mongodb://localhost:27017/gemini-image-generator"
+	// Get MySQL configuration from environment
+	dbHost := os.Getenv("DB_HOST")
+	if dbHost == "" {
+		dbHost = "localhost"
 	}
 
-	dbName := os.Getenv("MONGODB_DATABASE")
+	dbPort := os.Getenv("DB_PORT")
+	if dbPort == "" {
+		dbPort = "3306"
+	}
+
+	dbUser := os.Getenv("DB_USER")
+	if dbUser == "" {
+		dbUser = "root"
+	}
+
+	dbPassword := os.Getenv("DB_PASSWORD")
+	if dbPassword == "" {
+		dbPassword = ""
+	}
+
+	dbName := os.Getenv("DB_NAME")
 	if dbName == "" {
-		dbName = "gemini-image-generator"
+		dbName = "gemini_image_generator"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	// MySQL DSN format: user:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True&loc=Local
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		dbUser, dbPassword, dbHost, dbPort, dbName)
 
-	clientOptions := options.Client().ApplyURI(mongoURI)
-	client, err := mongo.Connect(ctx, clientOptions)
+	// Connect to MySQL
+	var err error
+	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		log.Fatal("Failed to connect to MongoDB:", err)
+		log.Fatal("Failed to connect to MySQL:", err)
 	}
 
-	// Ping the database
-	err = client.Ping(ctx, nil)
+	log.Println("Connected to MySQL successfully")
+
+	// Auto migrate the schema
+	err = DB.AutoMigrate(&models.Image{})
 	if err != nil {
-		log.Fatal("Failed to ping MongoDB:", err)
+		log.Fatal("Failed to migrate database:", err)
 	}
 
-	log.Println("Connected to MongoDB successfully")
-	DB = client.Database(dbName)
+	log.Println("Database migration completed")
 }

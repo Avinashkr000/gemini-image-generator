@@ -2,30 +2,19 @@ package controllers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 
 	"gemini-image-generator/config"
 	"gemini-image-generator/models"
 )
-
-var imageCollection *mongo.Collection
-
-func init() {
-	if config.DB != nil {
-		imageCollection = config.DB.Collection("images")
-	}
-}
 
 type GeminiImageRequest struct {
 	Prompt string `json:"prompt"`
@@ -35,7 +24,7 @@ type GeminiImageResponse struct {
 	Candidates []struct {
 		Content struct {
 			Parts []struct {
-				Text        string `json:"text,omitempty"`
+				Text       string `json:"text,omitempty"`
 				InlineData struct {
 					MimeType string `json:"mimeType"`
 					Data     string `json:"data"`
@@ -54,23 +43,12 @@ func GenerateImage(c *gin.Context) {
 
 	// Create image record
 	image := models.Image{
-		ID:        primitive.NewObjectID(),
-		Prompt:    req.Prompt,
-		Status:    "pending",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		Prompt: req.Prompt,
+		Status: "pending",
 	}
 
 	// Insert into database
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if imageCollection == nil {
-		imageCollection = config.DB.Collection("images")
-	}
-
-	_, err := imageCollection.InsertOne(ctx, image)
-	if err != nil {
+	if err := config.DB.Create(&image).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image record"})
 		return
 	}
@@ -97,10 +75,10 @@ func GenerateImage(c *gin.Context) {
 			},
 		},
 		"generationConfig": map[string]interface{}{
-			"temperature":     1,
-			"topK":            40,
-			"topP":            0.95,
-			"maxOutputTokens": 8192,
+			"temperature":      1,
+			"topK":             40,
+			"topP":             0.95,
+			"maxOutputTokens":  8192,
 			"responseMimeType": "image/jpeg",
 		},
 	}
@@ -114,8 +92,9 @@ func GenerateImage(c *gin.Context) {
 	resp, err := http.Post(geminiURL, "application/json", bytes.NewBuffer(jsonBody))
 	if err != nil {
 		// Update status to failed
-		imageCollection.UpdateOne(ctx, bson.M{"_id": image.ID}, bson.M{
-			"$set": bson.M{"status": "failed", "updatedAt": time.Now()},
+		config.DB.Model(&image).Updates(map[string]interface{}{
+			"status":     "failed",
+			"updated_at": time.Now(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to call Gemini API: " + err.Error()})
 		return
@@ -125,8 +104,9 @@ func GenerateImage(c *gin.Context) {
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		imageCollection.UpdateOne(ctx, bson.M{"_id": image.ID}, bson.M{
-			"$set": bson.M{"status": "failed", "updatedAt": time.Now()},
+		config.DB.Model(&image).Updates(map[string]interface{}{
+			"status":     "failed",
+			"updated_at": time.Now(),
 		})
 		c.JSON(http.StatusBadGateway, gin.H{
 			"error": fmt.Sprintf("Gemini API error (status %d): %s", resp.StatusCode, string(body)),
@@ -136,8 +116,9 @@ func GenerateImage(c *gin.Context) {
 
 	var geminiResp GeminiImageResponse
 	if err := json.Unmarshal(body, &geminiResp); err != nil {
-		imageCollection.UpdateOne(ctx, bson.M{"_id": image.ID}, bson.M{
-			"$set": bson.M{"status": "failed", "updatedAt": time.Now()},
+		config.DB.Model(&image).Updates(map[string]interface{}{
+			"status":     "failed",
+			"updated_at": time.Now(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse Gemini response"})
 		return
@@ -154,8 +135,9 @@ func GenerateImage(c *gin.Context) {
 	}
 
 	if imageData == "" {
-		imageCollection.UpdateOne(ctx, bson.M{"_id": image.ID}, bson.M{
-			"$set": bson.M{"status": "failed", "updatedAt": time.Now()},
+		config.DB.Model(&image).Updates(map[string]interface{}{
+			"status":     "failed",
+			"updated_at": time.Now(),
 		})
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "No image generated in response",
@@ -165,25 +147,17 @@ func GenerateImage(c *gin.Context) {
 	}
 
 	// Update image record with generated image
-	image.ImageURL = imageData
-	image.Status = "completed"
-	image.UpdatedAt = time.Now()
-
-	_, err = imageCollection.UpdateOne(ctx, bson.M{"_id": image.ID}, bson.M{
-		"$set": bson.M{
-			"imageUrl":  imageData,
-			"status":    "completed",
-			"updatedAt": time.Now(),
-		},
+	config.DB.Model(&image).Updates(map[string]interface{}{
+		"image_url":  imageData,
+		"status":     "completed",
+		"updated_at": time.Now(),
 	})
 
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update image record"})
-		return
-	}
+	// Fetch updated image
+	config.DB.First(&image, image.ID)
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":       image.ID.Hex(),
+		"id":       image.ID,
 		"prompt":   image.Prompt,
 		"imageUrl": image.ImageURL,
 		"status":   image.Status,
@@ -191,29 +165,12 @@ func GenerateImage(c *gin.Context) {
 }
 
 func GetImages(c *gin.Context) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if imageCollection == nil {
-		imageCollection = config.DB.Collection("images")
-	}
+	var images []models.Image
 
 	// Find all images, sorted by creation date (newest first)
-	cursor, err := imageCollection.Find(ctx, bson.M{}, nil)
-	if err != nil {
+	if err := config.DB.Order("created_at DESC").Find(&images).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch images"})
 		return
-	}
-	defer cursor.Close(ctx)
-
-	var images []models.Image
-	if err = cursor.All(ctx, &images); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode images"})
-		return
-	}
-
-	if images == nil {
-		images = []models.Image{}
 	}
 
 	c.JSON(http.StatusOK, images)
@@ -221,27 +178,15 @@ func GetImages(c *gin.Context) {
 
 func GetImageByID(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	imageID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if imageCollection == nil {
-		imageCollection = config.DB.Collection("images")
-	}
-
 	var image models.Image
-	err = imageCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&image)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch image"})
+	if err := config.DB.First(&image, imageID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
 		return
 	}
 
@@ -250,27 +195,20 @@ func GetImageByID(c *gin.Context) {
 
 func DeleteImage(c *gin.Context) {
 	id := c.Param("id")
-	objectID, err := primitive.ObjectIDFromHex(id)
+	imageID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid image ID"})
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if imageCollection == nil {
-		imageCollection = config.DB.Collection("images")
-	}
-
-	result, err := imageCollection.DeleteOne(ctx, bson.M{"_id": objectID})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete image"})
+	var image models.Image
+	if err := config.DB.First(&image, imageID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
 		return
 	}
 
-	if result.DeletedCount == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
+	if err := config.DB.Delete(&image).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete image"})
 		return
 	}
 

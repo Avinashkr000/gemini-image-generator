@@ -2,17 +2,15 @@ package models
 
 import (
 	"time"
-
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type Image struct {
-	ID          primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	Prompt      string             `json:"prompt" bson:"prompt"`
-	ImageURL    string             `json:"imageUrl" bson:"imageUrl"`
-	Status      string             `json:"status" bson:"status"` // pending, completed, failed
-	CreatedAt   time.Time          `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time          `json:"updatedAt" bson:"updatedAt"`
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	Prompt    string    `json:"prompt" gorm:"type:text;not null"`
+	ImageURL  string    `json:"imageUrl" gorm:"type:longtext"`
+	Status    string    `json:"status" gorm:"type:varchar(50);default:'pending'"`
+	CreatedAt time.Time `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 type GenerateImageRequest struct {
@@ -20,7 +18,7 @@ type GenerateImageRequest struct {
 }
 
 type GenerateImageResponse struct {
-	ID       string `json:"id"`
+	ID       uint   `json:"id"`
 	Prompt   string `json:"prompt"`
 	ImageURL string `json:"imageUrl"`
 	Status   string `json:"status"`
