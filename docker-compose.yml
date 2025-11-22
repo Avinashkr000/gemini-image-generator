@@ -1,19 +1,26 @@
 version: '3.8'
 
 services:
-  # MongoDB Database
-  mongodb:
-    image: mongo:7.0
-    container_name: gemini-mongodb
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: gemini-mysql
     restart: unless-stopped
     ports:
-      - "27017:27017"
+      - "3306:3306"
     volumes:
-      - mongodb_data:/data/db
+      - mysql_data:/var/lib/mysql
     environment:
-      MONGO_INITDB_DATABASE: gemini-image-generator
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: gemini_image_generator
+      MYSQL_USER: ${DB_USER:-gemini}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-geminipass}
     networks:
       - gemini-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
 
   # Go Backend
   backend:
@@ -28,11 +35,15 @@ services:
       PORT: 8080
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_API_URL: https://generativelanguage.googleapis.com/v1beta
-      MONGODB_URI: mongodb://mongodb:27017/gemini-image-generator
-      MONGODB_DATABASE: gemini-image-generator
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-gemini}
+      DB_PASSWORD: ${DB_PASSWORD:-geminipass}
+      DB_NAME: gemini_image_generator
       ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
     depends_on:
-      - mongodb
+      mysql:
+        condition: service_healthy
     networks:
       - gemini-network
 
@@ -53,7 +64,7 @@ services:
       - gemini-network
 
 volumes:
-  mongodb_data:
+  mysql_data:
     driver: local
 
 networks:

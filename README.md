@@ -5,7 +5,7 @@
 ![Gemini Image Generator](https://img.shields.io/badge/Gemini-AI%20Powered-purple?style=for-the-badge&logo=google)
 ![Go](https://img.shields.io/badge/Go-1.21-00ADD8?style=for-the-badge&logo=go)
 ![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react)
-![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?style=for-the-badge&logo=mongodb)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?style=for-the-badge&logo=mysql)
 
 A full-stack AI-powered image generation application using Google Gemini API, built with Go backend and React frontend.
 
@@ -31,7 +31,8 @@ A full-stack AI-powered image generation application using Google Gemini API, bu
 ### Backend
 - **Go 1.21** - High-performance backend
 - **Gin Framework** - Fast HTTP web framework
-- **MongoDB** - NoSQL database for image storage
+- **GORM** - The fantastic ORM library for Golang
+- **MySQL 8.0** - Reliable relational database
 - **Gemini API** - Google's latest AI model for image generation
 
 ### Frontend
@@ -51,7 +52,7 @@ A full-stack AI-powered image generation application using Google Gemini API, bu
 
 - Go 1.21 or higher
 - Node.js 18 or higher
-- MongoDB (local or Atlas)
+- MySQL 8.0 or higher
 - Gemini API Key ([Get it here](https://ai.google.dev/))
 
 ### Installation
@@ -63,7 +64,22 @@ git clone https://github.com/Avinashkr000/gemini-image-generator.git
 cd gemini-image-generator
 ```
 
-#### 2. Backend Setup
+#### 2. Setup MySQL Database
+
+```bash
+# Login to MySQL
+mysql -u root -p
+
+# Create database
+CREATE DATABASE gemini_image_generator;
+
+# Create user (optional)
+CREATE USER 'gemini'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON gemini_image_generator.* TO 'gemini'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+#### 3. Backend Setup
 
 ```bash
 cd backend
@@ -71,8 +87,10 @@ cd backend
 # Copy environment variables
 cp .env.example .env
 
-# Edit .env and add your Gemini API key
-# GEMINI_API_KEY=your_actual_api_key_here
+# Edit .env and configure:
+# - GEMINI_API_KEY=your_actual_api_key_here
+# - DB_PASSWORD=your_mysql_password
+# - DB_USER=root (or your mysql user)
 
 # Install dependencies
 go mod download
@@ -83,7 +101,7 @@ go run main.go
 
 Backend will start at `http://localhost:8080`
 
-#### 3. Frontend Setup
+#### 4. Frontend Setup
 
 ```bash
 cd frontend
@@ -103,6 +121,13 @@ Frontend will start at `http://localhost:3000`
 ### 🐳 Docker Setup (Recommended)
 
 ```bash
+# Copy environment file
+cp .env.example .env
+
+# Edit .env and add your Gemini API key
+# GEMINI_API_KEY=your_actual_key_here
+# DB_PASSWORD=your_secure_password
+
 # Build and run all services
 docker-compose up -d
 
@@ -116,7 +141,7 @@ docker-compose down
 Services:
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:8080`
-- MongoDB: `localhost:27017`
+- MySQL: `localhost:3306`
 
 ## 📡 API Endpoints
 
@@ -156,11 +181,11 @@ DELETE /api/images/:id
 gemini-image-generator/
 ├── backend/
 │   ├── config/
-│   │   └── database.go
+│   │   └── database.go       # MySQL connection with GORM
 │   ├── controllers/
 │   │   └── image_controller.go
 │   ├── models/
-│   │   └── image.go
+│   │   └── image.go          # GORM model
 │   ├── routes/
 │   │   └── routes.go
 │   ├── main.go
@@ -187,8 +212,14 @@ gemini-image-generator/
 PORT=8080
 GEMINI_API_KEY=your_gemini_api_key
 GEMINI_API_URL=https://generativelanguage.googleapis.com/v1beta
-MONGODB_URI=mongodb://localhost:27017/gemini-image-generator
-MONGODB_DATABASE=gemini-image-generator
+
+# MySQL Configuration
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=your_mysql_password
+DB_NAME=gemini_image_generator
+
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 ```
 
@@ -197,19 +228,38 @@ ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173
 VITE_API_URL=http://localhost:8080/api
 ```
 
+### Docker Compose (.env)
+```env
+GEMINI_API_KEY=your_gemini_api_key
+DB_USER=gemini
+DB_PASSWORD=secure_password
+```
+
 ## 🎯 Features in Detail
 
 ### Image Generation
 - Uses Gemini 2.0 Flash experimental model
 - Supports detailed prompts for precise image generation
 - Real-time status updates (pending, completed, failed)
-- Base64 encoded image storage
+- Base64 encoded image storage in MySQL (LONGTEXT)
+
+### Database Schema
+```sql
+CREATE TABLE images (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    prompt TEXT NOT NULL,
+    image_url LONGTEXT,
+    status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+```
 
 ### Image Management
 - View all generated images in a responsive grid
 - Download images in JPEG format
 - Delete unwanted images
-- Automatic timestamp tracking
+- Automatic timestamp tracking with GORM
 
 ### UI/UX
 - Modern gradient design
@@ -222,22 +272,45 @@ VITE_API_URL=http://localhost:8080/api
 
 ### Common Issues
 
-**1. MongoDB Connection Error**
+**1. MySQL Connection Error**
 ```bash
-# Make sure MongoDB is running
-docker-compose up mongodb
+# Check if MySQL is running
+sudo systemctl status mysql
 # or
-mongod --dbpath /path/to/data
+mysqladmin -u root -p ping
+
+# Start MySQL
+sudo systemctl start mysql
+
+# For Docker:
+docker-compose up mysql
 ```
 
-**2. Gemini API Error**
+**2. Database Migration Error**
+```bash
+# GORM auto-migrates on startup
+# If issues persist, manually create the database:
+mysql -u root -p -e "CREATE DATABASE gemini_image_generator;"
+```
+
+**3. Gemini API Error**
 - Verify your API key is correct
 - Check if you have API quota remaining
 - Ensure you're using the correct model name
 
-**3. CORS Error**
+**4. CORS Error**
 - Update `ALLOWED_ORIGINS` in backend .env
 - Restart the backend server
+
+**5. Port Already in Use**
+```bash
+# Check what's using port 3306
+sudo lsof -i :3306
+# or
+sudo netstat -tulpn | grep 3306
+
+# Kill the process or change port in .env
+```
 
 ## 📝 License
 
@@ -267,6 +340,6 @@ Give a ⭐️ if you like this project!
 
 <div align="center">
 
-**Built with ❤️ using Go, React, and Gemini AI**
+**Built with ❤️ using Go, React, MySQL, and Gemini AI**
 
 </div>
